@@ -103,9 +103,15 @@ class CloudSubscribe(_PluginBase):
     """网盘订阅助手插件。"""
 
     # 插件名称
-    plugin_name = "网盘订阅助手"
+    plugin_name = "网盘订阅助手(文件体积校验版)"
     # 插件描述
-    plugin_desc = "整合网盘能力与多渠道资源搜索，自动查找并补充订阅缺失的影视内容。"
+    plugin_desc = (
+        "感谢原作者 odomu 的开源贡献（github.com/odomu/MoviePilot-Plugins）。"
+        "本版在其 1.7.13 基础上加固："
+        "① 转存前按分享内真实视频文件累加体积，标题标注的体积不可信，"
+        "低于门槛或没有有效视频的引流分享直接跳过；"
+        "② 修复夸克带 ?pwd= 提取码的分享无法读取与转存的问题。"
+    )
     # 插件图标
     plugin_icon = "https://raw.githubusercontent.com/Davidjukk/MoviePilot-Plugins/main/icons/cloudsubscribe.png"
     # 插件版本

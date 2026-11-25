@@ -16,8 +16,8 @@
     "release": false
   },
   "CloudSubscribe": {
-    "name": "网盘订阅助手",
-    "description": "整合网盘能力与多渠道资源搜索，自动查找并补充订阅缺失的影视内容。原作者 odomu（github.com/odomu），本仓库为其加固版。",
+    "name": "网盘订阅助手(文件体积校验版)",
+    "description": "感谢原作者 odomu（github.com/odomu/MoviePilot-Plugins）。本版在其 1.7.13 基础上加固：① 转存前按分享内真实视频文件累加体积，标题标注的体积不可信，低于门槛或没有有效视频的引流分享直接跳过；② 修复夸克带 ?pwd= 提取码的分享无法读取与转存的问题。",
     "labels": "网盘,订阅,搜索,转存",
     "version": "1.7.13.1",
     "icon": "https://raw.githubusercontent.com/Davidjukk/MoviePilot-Plugins/main/icons/cloudsubscribe.png",
