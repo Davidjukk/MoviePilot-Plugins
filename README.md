@@ -35,8 +35,15 @@ https://github.com/Davidjukk/MoviePilot-Plugins
 
 ## CloudSubscribe 与上游的差异
 
-本仓库的 `cloudsubscribe` 基于上游 [odomu/MoviePilot-Plugins](https://github.com/odomu/MoviePilot-Plugins) 的 1.7.13，
-版权与设计归属原作者 `odomu`。在此基础上做了两处本地加固：
+本仓库的 `cloudsubscribe` 基于 **odomu** 的开源项目
+[odomu/MoviePilot-Plugins](https://github.com/odomu/MoviePilot-Plugins) 的 1.7.13，
+**功能与代码全部来自原作者，版权归 `odomu` 所有**，本仓库只做了两处本地加固。
+详细的致谢与原文链接见 [该目录的 README](plugins.v3/cloudsubscribe/README.md)。
+
+- 原版插件地址：https://github.com/odomu/MoviePilot-Plugins
+- 原版使用说明：https://github.com/odomu/MoviePilot-Plugins/blob/main/docs/cloudsubscribe.md
+
+两处加固：
 
 1. **真实体积校验**（`handlers/search/platform_rules.py`）
    网盘搜索结果的 `size` 恒为 0，标题里写的体积并不可信（实测标题 7.37GB = 3.70GB mp4 + 3.68GB 7z）。

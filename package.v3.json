@@ -17,7 +17,7 @@
   },
   "CloudSubscribe": {
     "name": "网盘订阅助手",
-    "description": "整合网盘能力与多渠道资源搜索，自动查找并补充订阅缺失的影视内容。本仓库版本额外加固了资源体积校验与夸克提取码解析。",
+    "description": "整合网盘能力与多渠道资源搜索，自动查找并补充订阅缺失的影视内容。原作者 odomu（github.com/odomu），本仓库为其加固版。",
     "labels": "网盘,订阅,搜索,转存",
     "version": "1.7.13.1",
     "icon": "https://raw.githubusercontent.com/Davidjukk/MoviePilot-Plugins/main/icons/cloudsubscribe.png",

@@ -3,9 +3,18 @@
 整合网盘能力与多渠道资源搜索，为 MoviePilot 订阅自动查找并转存网盘资源。
 中文名见插件市场：**网盘订阅助手**。
 
-> **来源声明**：本目录基于上游 [odomu/MoviePilot-Plugins](https://github.com/odomu/MoviePilot-Plugins) 的
-> `CloudSubscribe` **1.7.13**，版权与整体设计归原作者 `odomu` 所有。
-> 本仓库版本号记为 `1.7.13.1`，仅在其上追加了下面「本地加固」的两处补丁，未改动功能与交互。
+## 致谢
+
+这个插件**不是原创**。全部功能设计、代码实现和长期维护都来自 **odomu**，
+本目录只是在其基础上做了两处本地加固（见下文）。
+
+- 原版插件仓库：**https://github.com/odomu/MoviePilot-Plugins**
+- 原版使用说明：https://github.com/odomu/MoviePilot-Plugins/blob/main/docs/cloudsubscribe.md
+- 原作者 GitHub：https://github.com/odomu
+
+如果能用，请去原仓库给 odomu 点个 Star —— 真正干活的是他。
+本站版本是**派生版**（版本号 `1.7.13.1`，基于原版 `1.7.13`），版权归原作者所有，
+不受本仓库 MIT 许可的重新授权。
 
 ## 功能概述
 
