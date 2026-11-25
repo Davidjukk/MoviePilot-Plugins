@@ -182,10 +182,10 @@ class SeedPoolSite(_PluginBase):
 
     plugin_name = "SeedPool 站点支持"
     plugin_desc = "为 MoviePilot 未内建的 SeedPool（UNIT3D）站点补充搜索能力；中文片名自动转 IMDb / 英文名检索。"
-    plugin_icon = ""
+    plugin_icon = "https://raw.githubusercontent.com/Davidjukk/MoviePilot-Plugins/main/icons/seedpoolsite.png"
     plugin_version = "1.3.2"
-    plugin_author = "WorkBuddy"
-    author_url = "https://github.com/jxxghp/MoviePilot"
+    plugin_author = "davidjuk"
+    author_url = "https://github.com/Davidjukk"
     plugin_config_prefix = "seedpoolsite_"
     plugin_order = 21
     auth_level = 1

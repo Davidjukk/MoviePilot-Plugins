@@ -107,13 +107,13 @@ class CloudSubscribe(_PluginBase):
     # 插件描述
     plugin_desc = "整合网盘能力与多渠道资源搜索，自动查找并补充订阅缺失的影视内容。"
     # 插件图标
-    plugin_icon = "https://raw.githubusercontent.com/odomu/MoviePilot-Plugins/main/icons/cloud.png"
+    plugin_icon = "https://raw.githubusercontent.com/Davidjukk/MoviePilot-Plugins/main/icons/cloudsubscribe.png"
     # 插件版本
     plugin_version = "1.7.13.1"
     # 插件作者
-    plugin_author = "odomu"
+    plugin_author = "davidjuk"
     # 作者主页
-    author_url = "https://github.com/odomu"
+    author_url = "https://github.com/Davidjukk"
     # 插件配置项ID前缀
     plugin_config_prefix = "cloudsubscribe_"
     plugin_order = 21
