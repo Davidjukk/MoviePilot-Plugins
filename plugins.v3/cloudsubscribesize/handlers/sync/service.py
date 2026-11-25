@@ -1230,6 +1230,8 @@ class SyncHandler:
             log_success: bool = True,
     ) -> Optional[Path]:
         """使用网盘提供方的播放引用值生成 STRM。"""
+        # 每次调用先清空上一次的致命错误标记，供调用方判断是否需要继续重试
+        self._strm_last_fatal = ""
         if not self._strm_generate_enabled:
             return None
         if not self._strm_generator:
@@ -1261,6 +1263,15 @@ class SyncHandler:
             if log_success:
                 logger.debug(f"STRM 已生成：{strm_path} -> {content}")
             return strm_path
+        except PermissionError as error:
+            # 本地挂载目录不可写：重试再多次也不会成功，标记为致命错误让调用方立即判失败
+            self._strm_last_fatal = (
+                f"本地媒体目录不可写，无法生成 STRM：{error}"
+            )
+            logger.error(
+                f"生成 STRM 失败（本地目录不可写，不再重试）：{file_name}，原因：{error}"
+            )
+            return None
         except (OSError, StrmTemplateError) as error:
             logger.error(f"生成 STRM 失败：{file_name}，原因：{error}")
             return None

@@ -104,10 +104,10 @@ class SyncNamingService(OwnerDelegator):
                     cat_posix = category_name.strip("/")
                     if not resolved_posix.endswith(cat_posix):
                         resolved = resolved / cat_posix
+        media_type_value = getattr(
+            getattr(mediainfo, "type", None), "value", None
+        )
         if resolved is None:
-            media_type_value = getattr(
-                getattr(mediainfo, "type", None), "value", None
-            )
             if media_type_value in {
                 MediaType.MOVIE.value,
                 MediaType.TV.value,
@@ -115,6 +115,19 @@ class SyncNamingService(OwnerDelegator):
                 resolved = Path(str(root_path or "/")) / media_type_value
                 if category_name:
                     resolved = resolved / category_name.strip("/")
+        elif media_type_value in {MediaType.MOVIE.value, MediaType.TV.value}:
+            # 关键守护：新版 MP 把「按类型建目录」「按分类建目录」下放为目录级开关，
+            # 两个开关都关闭时 TransHandler 只返回媒体库根，目标文件会直接落到网盘根目录，
+            # 本地映射成挂载卷根（普通用户无写权限，STRM 永远写不出）。
+            # 此时按媒体类型补回一级目录，与历史记录（/电影/…、/电视剧/…）保持一致。
+            root_norm = Path(str(root_path or "/")).as_posix().rstrip("/")
+            resolved_norm = resolved.as_posix().rstrip("/")
+            if resolved_norm == root_norm:
+                resolved = Path(root_norm or "/") / media_type_value
+                logger.debug(
+                    f"分类根目录回落到媒体库根（{root_norm or '/'}），"
+                    f"按媒体类型补一级目录：{media_type_value}"
+                )
 
         if platform_root_lock and platform_root_cache:
             with platform_root_lock:

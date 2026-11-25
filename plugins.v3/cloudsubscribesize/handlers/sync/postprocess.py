@@ -1984,6 +1984,16 @@ class PostprocessService(OwnerDelegator):
             return
 
         ready_at = float(item.get("download_completed_at") or created_at)
+        fatal_reason = str(getattr(self, "_strm_last_fatal", "") or "")
+        if fatal_reason:
+            # 本地目录不可写属于环境问题，重试无效，直接判失败并说明原因
+            self._settle_pending_item(
+                item, pending_key, ctx,
+                detail=f"无法生成 STRM：{fatal_reason}",
+                item_failed=True,
+                reason=f"无法生成 STRM：{fatal_reason}",
+            )
+            return
         if ctx.now - ready_at >= self._FILE_FINALIZE_TIMEOUT:
             self._settle_pending_item(
                 item, pending_key, ctx,
