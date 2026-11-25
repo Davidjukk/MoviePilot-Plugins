@@ -1,0 +1,656 @@
+"""MoviePilot 平台规则适配与资源候选排名。"""
+
+# === PATCH:cloudsubscribe-real-size v1 | 基线 1.7.13 ===
+# 改动：网盘候选在进入规则判定前，补上分享内部真实视频体积（只累加 video_extensions，忽略压缩包/目录）
+# 升级插件后此文件会被覆盖，用 grep PATCH:cloudsubscribe-real-size 可确认补丁是否还在
+
+import hashlib
+import json
+import time
+from importlib import import_module
+from typing import Any, Dict, List, Optional, Tuple
+
+from app.log import logger
+from app.schemas import MediaInfo, TorrentInfo
+from app.utils.string import StringUtils
+
+from ...core import CloudDriveCapability, OwnerDelegator
+from ...search.matching import positive_ints
+
+
+class PlatformRuleService(OwnerDelegator):
+    """集中处理平台过滤规则与 CloudSubscribe 资源结构之间的适配。"""
+
+    @staticmethod
+    def _resource_filter_title(resource: Dict[str, Any]) -> str:
+        """将搜索源的结构化发布信息还原为可识别的规则标题。"""
+        video_info = resource.get("video_info") or {}
+        language_values = []
+        for value in (
+                resource.get("languages"), resource.get("subtitle_languages")
+        ):
+            if isinstance(value, (list, tuple, set)):
+                language_values.extend(value)
+            elif value:
+                language_values.append(value)
+        fields = (
+            resource.get("title"),
+            resource.get("resolution"),
+            resource.get("quality"),
+            resource.get("source_type"),
+            resource.get("codec"),
+            resource.get("audio_codec"),
+            resource.get("audio_channels"),
+            resource.get("hdr_type"),
+            video_info.get("hdr") if isinstance(video_info, dict) else "",
+            resource.get("release_group"),
+            " ".join(str(value) for value in language_values if str(value).strip()),
+            resource.get("subtitle"),
+            resource.get("description"),
+        )
+        return " ".join(dict.fromkeys(
+            str(value).strip() for value in fields if str(value or "").strip()
+        ))
+
+    @staticmethod
+    def _file_filter_title(item: Any, index: int) -> str:
+        """保留父目录中的版本信息，供平台规则识别清晰度、来源和编码。"""
+        value = (
+                item.get("_relative_path")
+                or item.get("cloud_path")
+                or item.get("name")
+                or f"file-{index}"
+        )
+        title = str(value).replace("\\", " ").replace("/", " ").strip()
+        file_name = str(item.get("name") or "").strip()
+        if file_name and file_name not in title:
+            title = f"{title} {file_name}".strip()
+        return title
+
+    @staticmethod
+    def _resolve_subscribe_chain() -> Any:
+        """解析订阅链：v2 走包根，v3 同时兼容查询模块的独立入口。"""
+        for module_name, attr_name in (
+                ("app.chain.subscribe", "SubscribeChain"),
+                ("app.chain.subscribe.query", "SubscribeQueryChain"),
+        ):
+            try:
+                module = import_module(module_name)
+            except ImportError:
+                continue
+            chain = getattr(module, attr_name, None)
+            if chain is not None:
+                return chain
+        return None
+
+    @staticmethod
+    def _safe_subscribe_params(subscribe: Any) -> Optional[Dict[str, Any]]:
+        """安全读取订阅参数，同时兼容 MoviePilot v2 与 v3 契约。"""
+        if not subscribe:
+            return None
+        SubscribeChain = PlatformRuleService._resolve_subscribe_chain()
+        if not SubscribeChain:
+            return None
+
+        # 补充所有可能字段的默认值，防止 v3 dot-access 触发 AttributeError
+        for attr in (
+            "quality", "resolution", "effect", "include", "exclude",
+            "audio_quality", "audio_format", "min_bitrate", "min_bit_depth",
+            "min_sample_rate", "filter_groups", "sites", "custom_words",
+        ):
+            if not hasattr(subscribe, attr):
+                try:
+                    setattr(subscribe, attr, None)
+                except Exception:
+                    pass
+
+        # 优先类方法/静态方法（v3）
+        get_params = getattr(SubscribeChain, "get_params", None)
+        if callable(get_params):
+            try:
+                return get_params(subscribe)
+            except TypeError:
+                try:
+                    chain = SubscribeChain() if callable(SubscribeChain) else None
+                    if chain and hasattr(chain, "get_params"):
+                        return chain.get_params(subscribe)
+                except Exception:
+                    pass
+            except Exception as err:
+                logger.debug(f"SubscribeChain.get_params 读取失败：{err}")
+                return None
+
+        # 备选实例化调用（v2）
+        try:
+            chain = SubscribeChain() if callable(SubscribeChain) else None
+            if chain and hasattr(chain, "get_params") and callable(chain.get_params):
+                return chain.get_params(subscribe)
+        except Exception:
+            pass
+
+        return None
+
+    def _filter_by_platform_rules(
+            self,
+            resources: List[Dict],
+            mediainfo: MediaInfo,
+            subscribe: Any = None,
+            season: Optional[int] = None,
+            target_episodes: Optional[List[int]] = None,
+            prefiltered: bool = False,
+    ) -> List[Dict]:
+        """使用平台规则组筛选并按平台优先级排序。"""
+        if not resources:
+            return []
+        if not prefiltered:
+            resources = self._prefilter_resource_order(
+                resources, season=season, target_episodes=target_episodes
+            )
+        try:
+            try:
+                from app.application.torrent.download import TorrentHelper
+            except ImportError:
+                try:
+                    from app.helper.torrent import TorrentHelper
+                except ImportError:
+                    TorrentHelper = None
+
+            rule_groups = self._platform_rule_groups(subscribe)
+            filter_params = self._safe_subscribe_params(subscribe)
+            torrent_helper = TorrentHelper() if TorrentHelper else None
+            # 网盘分享标题里的体积不可信（常见把压缩包、多版本合并上报），
+            # 规则组里存在体积条件时，先解析分享内部真实视频体积再参与判定。
+            self.__dict__["_real_size_enabled"] = self._has_size_rule(rule_groups)
+            self.__dict__["_real_size_budget_left"] = self._REAL_SIZE_BUDGET
+            self.__dict__["_real_size_scanned"] = 0
+            skipped_no_video = 0
+            unreadable = 0
+
+            torrents = []
+            resource_by_url = {}
+            for index, resource in enumerate(resources):
+                title = self._resource_filter_title(resource)
+                page_url = f"https://cloudsubscribe.invalid/resource/{index}"
+                resource_size, size_status = self._resolve_resource_size(resource)
+                if size_status == "novideo":
+                    skipped_no_video += 1
+                    logger.info(
+                        f"[体积校验] 分享内无视频文件，跳过：{resource.get('url') or title}"
+                    )
+                    continue
+                if size_status == "unreadable":
+                    unreadable += 1
+                torrent_info = TorrentInfo(
+                    title=title or f"resource-{index}",
+                    description=str(resource.get("description") or ""),
+                    page_url=page_url,
+                    size=resource_size,
+                    labels=[],
+                )
+                if filter_params and torrent_helper and not torrent_helper.filter_torrent(
+                        torrent_info=torrent_info, filter_params=filter_params
+                ):
+                    logger.debug(
+                        f"[平台过滤] 资源未通过订阅卡片规则过滤：{torrent_info.title}"
+                    )
+                    continue
+
+                torrents.append(torrent_info)
+                resource_by_url[page_url] = resource
+
+            if not torrents:
+                return []
+
+            if not rule_groups:
+                return [resource_by_url[t.page_url] for t in torrents if t.page_url in resource_by_url]
+
+            matched = self.filter_torrents_by_rules(
+                rule_groups=rule_groups,
+                torrent_list=torrents,
+                mediainfo=mediainfo,
+            ) or []
+            filtered = []
+            for item in matched:
+                resource = resource_by_url.get(getattr(item, "page_url", None))
+                if resource is None:
+                    continue
+                resource = dict(resource)
+                resource["platform_priority"] = int(
+                    getattr(item, "pri_order", 0) or 0
+                )
+                filtered.append(resource)
+            targets = positive_ints(target_episodes)
+            filtered.sort(
+                key=lambda resource: self._resource_sort_key(
+                    resource, season, targets
+                )
+            )
+            if self.__dict__.get("_real_size_enabled"):
+                logger.info(
+                    f"[体积校验] 候选 {len(resources)} 个 | 读到真实体积 "
+                    f"{self.__dict__.get('_real_size_scanned', 0)} 个 | "
+                    f"无视频跳过 {skipped_no_video} 个 | 读取失败按未知放行 {unreadable} 个 | "
+                    f"最终通过 {len(filtered)} 个"
+                )
+            logger.debug(
+                f"平台优先级规则组筛选资源：{len(resources)} -> {len(filtered)}，"
+                f"规则组：{rule_groups}"
+            )
+            return filtered
+
+        except Exception as error:
+            logger.warning(
+                f"平台优先级规则组筛选异常，降级使用原始候选：{error}"
+            )
+            return resources
+
+    # ---- 真实体积解析（网盘分享标题里的体积不可信，必须读内部文件列表） ----
+
+    _REAL_SIZE_CACHE_TTL = 600          # 秒，单个分享的真实体积缓存时长
+    _REAL_SIZE_BUDGET = 20              # 单次筛选最多为多少个分享发起目录读取
+    _DEFAULT_VIDEO_EXTS = (".mkv", ".mp4", ".avi", ".iso")
+    _CLOUD_KEYWORDS = (
+        "quark", "uc", "115", "123", "baidu", "alipan", "tianyi", "guangya", "yun139",
+    )
+
+    def _owner_attr(self, name: str) -> Any:
+        """沿 _owner/_plugin 链查找宿主属性。
+
+        PlatformRuleService 只是职责委托层，网盘注册表挂在插件本体上，
+        直接 getattr 会被 SearchHandler 的组件解析挡住。
+        """
+        current = self.__dict__.get("_owner")
+        seen = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            value = getattr(current, "__dict__", {}).get(name)
+            if value is not None:
+                return value
+            value = getattr(current, name, None)
+            if value is not None:
+                return value
+            nxt = getattr(current, "_owner", None) or getattr(current, "_plugin", None)
+            current = nxt if nxt is not None else None
+        return None
+
+    def _video_ext_set(self) -> set:
+        """读取用户配置的视频扩展名，缺省时回落到内置集合。"""
+        exts = self._owner_attr("_video_extensions") or self._DEFAULT_VIDEO_EXTS
+        return {f".{str(item).strip().lower().lstrip('.')}" for item in exts if str(item).strip()}
+
+    def _resource_cloud_key(self, resource: Dict[str, Any]) -> str:
+        """识别资源所属网盘，非网盘资源返回空串（磁力等沿用搜索给出的体积）。"""
+        raw = str(resource.get("resource_type") or "").strip().lower()
+        if raw:
+            try:
+                from ...search.types import normalize_resource_type
+                raw = str(normalize_resource_type(raw) or raw).lower()
+            except Exception:
+                pass
+            if raw in self._CLOUD_KEYWORDS:
+                return raw
+        url = str(resource.get("url") or "").strip().lower()
+        for keyword in self._CLOUD_KEYWORDS:
+            if keyword in url:
+                return keyword
+        return ""
+
+    def _sum_video_size(self, items: Any) -> Tuple[int, int]:
+        """只累加视频文件体积，目录、压缩包、字幕包一律不计。返回 (体积, 视频文件数)。"""
+        if not isinstance(items, list):
+            return 0, 0
+        exts = self._video_ext_set()
+        total = 0
+        count = 0
+        for item in items:
+            if isinstance(item, str):
+                name, size = item, 0
+            elif isinstance(item, dict):
+                if item.get("is_dir") or item.get("is_directory"):
+                    continue
+                name = str(item.get("name") or "")
+                size = int(item.get("size") or 0)
+            else:
+                name = str(getattr(item, "name", "") or "")
+                size = int(getattr(item, "size", 0) or 0)
+            if not name:
+                continue
+            suffix = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
+            if suffix not in exts:
+                continue
+            count += 1
+            total += max(0, size)
+        return total, count
+
+    def _share_transfer_service(self, cloud_key: str):
+        """取指定网盘的分享服务，用于读取分享内文件列表。"""
+        registry = self._owner_attr("_cloud_drive_registry")
+        if registry:
+            try:
+                provider = registry.get(cloud_key)
+            except Exception:
+                provider = None
+            if provider and provider.supports(CloudDriveCapability.SHARE_TRANSFER):
+                return provider.require(CloudDriveCapability.SHARE_TRANSFER)
+        drive = self._owner_attr("_cloud_drive")
+        if drive and cloud_key == str(getattr(drive, "key", "") or ""):
+            try:
+                return drive.require(CloudDriveCapability.SHARE_TRANSFER)
+            except Exception:
+                return None
+        return None
+
+    def _share_scan(self, share_url: str, cloud_key: str) -> Optional[Tuple[int, int]]:
+        """读取分享内部文件列表，返回 (视频体积, 视频文件数)。
+
+        返回 None 表示**读取失败**（分享失效、需要提取码、被风控等），
+        调用方必须把它当作"体积未知"处理，不能等同于"没有视频"。
+        """
+        cache = self.__dict__.setdefault("_real_size_cache", {})
+        now = time.time()
+        cached = cache.get(share_url)
+        if cached and cached[0] > now:
+            return cached[1]
+        budget = int(self.__dict__.get("_real_size_budget_left", self._REAL_SIZE_BUDGET))
+        if budget <= 0:
+            return None
+        self.__dict__["_real_size_budget_left"] = budget - 1
+        service = self._share_transfer_service(cloud_key)
+        if service is None or not hasattr(service, "list_share_files"):
+            return None
+        try:
+            files = service.list_share_files(share_url)
+        except Exception as error:
+            logger.debug(f"读取分享真实体积失败：{error}")
+            return None
+        # 插件内部出错时返回空列表（失效/提取码/风控），同样视为读取失败
+        if not files:
+            return None
+        scan = self._sum_video_size(files)
+        self.__dict__["_real_size_scanned"] = int(
+            self.__dict__.get("_real_size_scanned", 0)
+        ) + 1
+        logger.debug(
+            f"分享真实体积 {StringUtils.str_filesize(scan[0])}"
+            f"（视频 {scan[1]} 个，文件 {len(files)} 个）：{share_url}"
+        )
+        if len(cache) > 500:
+            cache.clear()
+        cache[share_url] = (now + self._REAL_SIZE_CACHE_TTL, scan)
+        return scan
+
+    def _has_size_rule(self, rule_groups: List[str]) -> bool:
+        """规则组里是否存在体积条件；没有则不必为候选读取分享目录。
+
+        判断不出时返回 True（照常读取），宁可多几次目录请求，也不能让体积门槛静默失效。
+        """
+        try:
+            from app.db.systemconfig_oper import SystemConfigOper
+            from app.schemas.types import SystemConfigKey
+
+            oper = SystemConfigOper()
+
+            def _load(*names: str) -> list:
+                for name in names:
+                    key = getattr(SystemConfigKey, name, None)
+                    if key is None:
+                        continue
+                    value = oper.get(key)
+                    if value:
+                        return value if isinstance(value, list) else []
+                return []
+
+            rules = _load(
+                "CustomFilterRules", "UserFilterRules",
+            ) + _load("BuiltinFilterRules", "DefaultFilterRules")
+            sized = {
+                str(rule.get("id"))
+                for rule in rules
+                if isinstance(rule, dict) and rule.get("size_range")
+            }
+            if not sized:
+                # 一条带体积的规则都没有，扫描目录没有意义
+                return False
+            groups = _load(
+                "UserFilterRuleGroups", "SubscribeFilterRuleGroups", "FilterRuleGroups",
+            )
+            if not groups:
+                return True
+            wanted = {str(name) for name in rule_groups or []}
+            matched_any = False
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                if str(group.get("name")) not in wanted:
+                    continue
+                matched_any = True
+                text = str(group.get("rule_string") or "")
+                if any(rule_id in text for rule_id in sized):
+                    return True
+            # 没找到目标规则组（枚举名可能对不上），按需要读取处理
+            return not matched_any
+        except Exception as error:
+            logger.debug(f"检测体积规则失败，按需要读取体积处理：{error}")
+            return True
+
+    def _resolve_resource_size(
+            self, resource: Dict[str, Any]
+    ) -> Tuple[Optional[int], str]:
+        """返回 (参与规则判定的体积, 判定来源)。
+
+        来源取值：
+          ``real``       —— 分享内部真实视频体积（标题体积不可信，以它为准）
+          ``declared``   —— 搜索给出的体积（磁力/PT 等本来就有真实体积）
+          ``novideo``    —— 确认分享里没有视频文件，体积为 None，调用方应跳过
+          ``unreadable`` —— 分享读取失败，体积未知，按 declared 放行（不误杀）
+        """
+        declared = max(0, int(StringUtils.num_filesize(resource.get("size")) or 0))
+        cloud_key = self._resource_cloud_key(resource)
+        if not cloud_key:
+            return declared, "declared"
+        listed = resource.get("file_list") or (resource.get("provider_data") or {}).get("file_list")
+        if isinstance(listed, list) and listed:
+            total, count = self._sum_video_size(listed)
+            return (total, "real") if count else (None, "novideo")
+        url = str(resource.get("url") or "").strip()
+        if not url or not self.__dict__.get("_real_size_enabled"):
+            return declared, "declared"
+        scan = self._share_scan(url, cloud_key)
+        if scan is None:
+            return declared, "unreadable"
+        total, count = scan
+        if not count:
+            return None, "novideo"
+        return total, "real"
+
+    def _platform_rule_groups(self, subscribe: Any = None) -> List[str]:
+        """读取订阅指定规则组，否则使用对应的全局规则组。"""
+        from app.db.systemconfig_oper import SystemConfigOper
+        from app.schemas.types import SystemConfigKey
+
+        raw_groups = getattr(subscribe, "filter_groups", None)
+        if raw_groups and not hasattr(raw_groups, "_mock_return_value"):
+            return list(raw_groups)
+        # 全局规则组在一次搜索内被每个搜索源各读一次，短 TTL 缓存避免重复读库。
+        cache = self.__dict__.get("_platform_rule_groups_cache")
+        if cache is None:
+            cache = {}
+            object.__setattr__(self, "_platform_rule_groups_cache", cache)
+        config_key = (
+            SystemConfigKey.BestVersionFilterRuleGroups
+            if self._is_cloud_upgrade_subscribe(subscribe)
+            else SystemConfigKey.SubscribeFilterRuleGroups
+        )
+        cached = cache.get(config_key)
+        now = time.monotonic()
+        if cached and now - cached[0] < 5.0:
+            return list(cached[1])
+        groups: List[str] = []
+        try:
+            val = SystemConfigOper().get(config_key)
+            if val and not hasattr(val, "_mock_return_value"):
+                groups = list(val)
+        except Exception:
+            pass
+        if not groups:
+            # MoviePilot 未选择订阅/洗版规则组时，评分会全部为 0，
+            # 回退到“用户规则组”，由规则库按媒体类型与分类自动筛选。
+            try:
+                user_groups = SystemConfigOper().get(
+                    SystemConfigKey.UserFilterRuleGroups
+                ) or []
+                groups = [
+                    str(group.get("name"))
+                    for group in user_groups
+                    if isinstance(group, dict) and group.get("name")
+                ]
+                if groups:
+                    logger.debug(
+                        f"未配置 {config_key}，回退使用用户规则组："
+                        f"{','.join(groups)}"
+                    )
+            except Exception:
+                pass
+        if not groups:
+            warned = self.__dict__.setdefault("_platform_rule_warned", set())
+            if config_key not in warned:
+                warned.add(config_key)
+                logger.warning(
+                    "未配置订阅/洗版规则组，所有候选评分将为 0，"
+                    "洗版只能按文件大小判断；请在 MoviePilot 设置中选择规则组"
+                )
+        cache[config_key] = (now, groups)
+        return list(groups)
+
+    def rank_file_candidates(
+            self,
+            files: List[Any],
+            mediainfo: MediaInfo,
+            subscribe: Any = None,
+    ) -> List[tuple]:
+        """使用规则组筛选实际文件并返回 ``(文件, pri_order)``。"""
+        candidates = [item for item in files or [] if item]
+        if not candidates:
+            return []
+        rule_groups = self._platform_rule_groups(subscribe)
+        if not rule_groups:
+            return sorted(
+                ((item, 0) for item in candidates),
+                key=lambda pair: max(
+                    0, int(StringUtils.num_filesize(pair[0].get("size")) or 0)
+                ),
+                reverse=True,
+            )
+
+        try:
+            from app.application.torrent.download import TorrentHelper
+        except ImportError:
+            try:
+                from app.helper.torrent import TorrentHelper
+            except ImportError:
+                TorrentHelper = None
+
+        torrents = []
+        by_url = {}
+        size_by_url = {}
+        filter_params = self._safe_subscribe_params(subscribe)
+        torrent_helper = TorrentHelper() if TorrentHelper else None
+
+        for index, item in enumerate(candidates):
+            page_url = f"https://cloudsubscribe.invalid/file/{index}"
+            size_bytes = max(
+                0, int(StringUtils.num_filesize(item.get("size")) or 0)
+            )
+            torrent_info = TorrentInfo(
+                title=self._file_filter_title(item, index),
+                description="",
+                page_url=page_url,
+                size=size_bytes,
+                labels=[],
+            )
+            if filter_params and not torrent_helper.filter_torrent(
+                    torrent_info=torrent_info, filter_params=filter_params
+            ):
+                continue
+
+            torrents.append(torrent_info)
+            by_url[page_url] = item
+            size_by_url[page_url] = size_bytes
+        try:
+            matched = self.filter_torrents_by_rules(
+                rule_groups=rule_groups,
+                torrent_list=torrents,
+                mediainfo=mediainfo,
+            )
+        except Exception as error:
+            logger.error(f"平台优先级规则匹配文件失败：{error}")
+            return []
+        ranked = [
+            (
+                by_url[item.page_url],
+                int(item.pri_order or 0),
+                size_by_url[item.page_url],
+            )
+            for item in matched or []
+            if getattr(item, "page_url", None) in by_url
+        ]
+        ranked.sort(key=lambda item: (item[1], item[2]), reverse=True)
+        return [(item, priority) for item, priority, _ in ranked]
+
+    def select_file_candidate(
+            self,
+            files: List[Any],
+            mediainfo: MediaInfo,
+            subscribe: Any = None,
+    ) -> tuple:
+        ranked = self.rank_file_candidates(files, mediainfo, subscribe)
+        return ranked[0] if ranked else (None, 0)
+
+    def filter_torrents_by_rules(
+            self,
+            rule_groups: List[str],
+            torrent_list: List[Any],
+            mediainfo: MediaInfo,
+    ) -> List[Any]:
+        """复用 MoviePilot 过滤模块，避免每次搜索或评分重复加载规则集。"""
+        with self._platform_filter_lock:
+            signature = self._platform_rules_signature()
+            if (
+                    self._platform_filter_module is None
+                    or signature != self._platform_filter_signature
+            ):
+                from app.modules.filter import FilterModule
+
+                self._platform_filter_module = FilterModule()
+                self._platform_filter_module.init_module()
+                self._platform_filter_signature = signature
+                logger.debug("MoviePilot平台过滤规则已同步到 CloudSubscribe")
+            return self._platform_filter_module.filter_torrents(
+                rule_groups=rule_groups,
+                torrent_list=torrent_list,
+                mediainfo=mediainfo,
+            ) or []
+
+    def _platform_rules_signature(self) -> str:
+        """检测平台规则配置变化，避免长期复用已经过期的 FilterModule。"""
+        cached = self._platform_filter_signature_cache.get("signature")
+        if cached:
+            return str(cached)
+        from app.db.systemconfig_oper import SystemConfigOper
+        from app.schemas.types import SystemConfigKey
+
+        oper = SystemConfigOper()
+        payload = {
+            "groups": oper.get(SystemConfigKey.UserFilterRuleGroups) or [],
+            "rules": oper.get(SystemConfigKey.CustomFilterRules) or [],
+        }
+        serialized = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        signature = hashlib.sha1(serialized.encode("utf-8")).hexdigest()
+        self._platform_filter_signature_cache.set("signature", signature)
+        return signature

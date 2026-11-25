@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 本地产物 / 备份
+*.bak
+*.orig-*
+*.prev
+*.log
+*.db
+*.sqlite3
+.DS_Store
