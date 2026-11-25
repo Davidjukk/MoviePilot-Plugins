@@ -1,7 +1,10 @@
 # 网盘订阅助手(文件体积校验版)
 
 整合网盘能力与多渠道资源搜索，为 MoviePilot 订阅自动查找并转存网盘资源。
-中文名见插件市场：**网盘订阅助手**。
+插件 ID：`CloudSubscribeSize`（市场显示名：**网盘订阅助手(文件体积校验版)**）。
+
+> ID 与原作者版本的 `CloudSubscribe` **不同**，两者可以同时安装、互不覆盖；
+> 市场里各占一条，想用哪个装哪个。
 
 ## 致谢
 
@@ -63,4 +66,4 @@ cloudsubscribe/
 ## 安装
 
 从本仓库的插件市场安装即可，`dist/assets` 已随源码一同提供，不依赖 Release 资产。
-若手动安装，把整个 `cloudsubscribe` 目录放到 MoviePilot 的插件目录后重载插件。
+若手动安装，把整个 `cloudsubscribesize` 目录放到 MoviePilot 的插件目录后重载插件。

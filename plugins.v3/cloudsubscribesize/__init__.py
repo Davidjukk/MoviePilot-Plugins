@@ -99,7 +99,7 @@ _COMPONENT_TYPES = (
 )
 
 
-class CloudSubscribe(_PluginBase):
+class CloudSubscribeSize(_PluginBase):
     """网盘订阅助手插件。"""
 
     # 插件名称

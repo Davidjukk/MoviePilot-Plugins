@@ -8,7 +8,7 @@
 | 插件 | ID | 版本 | 说明 |
 | --- | --- | --- | --- |
 | SeedPool 站点支持 | `SeedPoolSite` | 1.3.2 | 为未内建的 SeedPool（UNIT3D）站点补搜索；中文片名自动转 IMDb / 英文名 |
-| 网盘订阅助手(文件体积校验版) | `CloudSubscribe` | 1.7.13.1 | 网盘订阅 + 多渠道资源搜索；本仓库为 1.7.13 的加固版 |
+| 网盘订阅助手(文件体积校验版) | `CloudSubscribeSize` | 1.7.13.1 | 网盘订阅 + 多渠道资源搜索；本仓库为 1.7.13 的加固版 |
 
 ## 安装
 
@@ -30,15 +30,15 @@ https://github.com/Davidjukk/MoviePilot-Plugins
 ├── icons/                          # 市场图标
 └── plugins.v3/
     ├── seedpoolsite/
-    └── cloudsubscribe/             # 含 dist/assets 前端联邦产物
+    └── cloudsubscribesize/         # 含 dist/assets 前端联邦产物
 ```
 
-## CloudSubscribe 与上游的差异
+## CloudSubscribeSize 与上游的差异
 
-本仓库的 `cloudsubscribe` 基于 **odomu** 的开源项目
+本仓库的 `cloudsubscribesize` 基于 **odomu** 的开源项目
 [odomu/MoviePilot-Plugins](https://github.com/odomu/MoviePilot-Plugins) 的 1.7.13，
 **功能与代码全部来自原作者，版权归 `odomu` 所有**，本仓库只做了两处本地加固。
-详细的致谢与原文链接见 [该目录的 README](plugins.v3/cloudsubscribe/README.md)。
+详细的致谢与原文链接见 [该目录的 README](plugins.v3/cloudsubscribesize/README.md)。
 
 - 原版插件地址：https://github.com/odomu/MoviePilot-Plugins
 - 原版使用说明：https://github.com/odomu/MoviePilot-Plugins/blob/main/docs/cloudsubscribe.md
@@ -54,13 +54,17 @@ https://github.com/Davidjukk/MoviePilot-Plugins
 
 两处改动在文件头都留有 `PATCH:cloudsubscribe-*` 标记，便于用 `grep` 确认补丁是否在位。
 
+> **插件 ID 说明**：本加固版使用 `CloudSubscribeSize` 作为 ID，与原作者版本的 `CloudSubscribe`
+> **不同**，因此两者可以在同一个 MoviePilot 里共存，市场里也不会互相覆盖。
+> 想装原版就加 `odomu` 的仓库，想装加固版就加本仓库，互不影响。
+
 ## 维护说明
 
-本仓库里的 `cloudsubscribe` 本身就是**已打补丁的完整源码**，直接安装即可，无需额外操作。
+本仓库里的 `cloudsubscribesize` 本身就是**已打补丁的完整源码**，直接安装即可，无需额外操作。
 两处补丁都在文件头留了标记，可用下面的命令确认补丁是否在位：
 
 ```bash
-grep -rn "PATCH:cloudsubscribe" plugins.v3/cloudsubscribe/
+grep -rn "PATCH:cloudsubscribe" plugins.v3/cloudsubscribesize/
 ```
 
 唯一需要注意的是**上游发新版本时**：用上游源码覆盖本目录后，补丁会被冲掉，

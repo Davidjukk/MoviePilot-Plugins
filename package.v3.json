@@ -15,9 +15,9 @@
     "plugin_readme": "https://raw.githubusercontent.com/Davidjukk/MoviePilot-Plugins/main/plugins.v3/seedpoolsite/README.md",
     "release": false
   },
-  "CloudSubscribe": {
+  "CloudSubscribeSize": {
     "name": "网盘订阅助手(文件体积校验版)",
-    "description": "感谢原作者 odomu（github.com/odomu/MoviePilot-Plugins）。本版在其 1.7.13 基础上加固：① 转存前按分享内真实视频文件累加体积，标题标注的体积不可信，低于门槛或没有有效视频的引流分享直接跳过；② 修复夸克带 ?pwd= 提取码的分享无法读取与转存的问题。",
+    "description": "感谢原作者 odomu（github.com/odomu/MoviePilot-Plugins）。本版在其 1.7.13 基础上加固：① 转存前按分享内真实视频文件累加体积，标题标注的体积不可信，低于门槛或没有有效视频的引流分享直接跳过；② 修复夸克带 ?pwd= 提取码的分享无法读取与转存的问题。插件 ID 与原作者版本不同，可与之共存。",
     "labels": "网盘,订阅,搜索,转存",
     "version": "1.7.13.1",
     "icon": "https://raw.githubusercontent.com/Davidjukk/MoviePilot-Plugins/main/icons/cloudsubscribe.png",
@@ -29,7 +29,7 @@
       "v1.7.13.1": "基于上游 1.7.13 的本地加固版：① 体积门槛改按分享内真实视频文件累加（标题里的体积不可信），无视频的引流分享直接跳过；② 夸克分享链接支持 ?pwd= 提取码解析，修复带码分享无法读取与转存。",
       "v1.7.13": "上游版本。"
     },
-    "plugin_readme": "https://raw.githubusercontent.com/Davidjukk/MoviePilot-Plugins/main/plugins.v3/cloudsubscribe/README.md",
+    "plugin_readme": "https://raw.githubusercontent.com/Davidjukk/MoviePilot-Plugins/main/plugins.v3/cloudsubscribesize/README.md",
     "release": false
   }
 }
